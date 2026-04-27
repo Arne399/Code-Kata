@@ -15,18 +15,18 @@ public class EngineerService
             .ToList();
     }
 
-    public bool HasSkill(Engineer engineer, SkillType skillType)
+    private bool HasSkill(Engineer engineer, SkillType skillType)
     {
         return engineer.Skills.Contains(skillType);
     }
 
-    public int GetRemainingWorkMinutes(Engineer engineer)
+    private int GetRemainingWorkMinutes(Engineer engineer)
     {
         var usedMinutes = GetScheduleEntriesForEngineer(engineer.Id).Sum(entry => entry.Minutes);
         return engineer.MaxWorkMinutes - usedMinutes;
     }
 
-    public IReadOnlyList<WorkScheduleEntry> GetScheduleEntriesForEngineer(string engineerId)
+    private IReadOnlyList<WorkScheduleEntry> GetScheduleEntriesForEngineer(string engineerId)
     {
         return State.WorkSchedules
             .Where(entry => entry.EngineerId == engineerId)

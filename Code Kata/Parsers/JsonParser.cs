@@ -51,17 +51,17 @@ public static class JsonParser
             PropertyNameCaseInsensitive = true,
             Converters =
             {
-                new JsonStringEnumConverter()
+                new JsonStringEnumConverter(),
+                new TimeOnlyJsonConverter()
             }
         };
     }
 
     public static string ToJson<T>(T entity)
     {
-        var options = new JsonSerializerOptions
-        {
-            WriteIndented = true
-        };
+        var options = CreateOptions();
+        options.WriteIndented = true;
+
         return JsonSerializer.Serialize(entity, options);
     }
 }

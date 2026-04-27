@@ -1,4 +1,3 @@
-using Code_Kata.Entities.Engineers;
 using Code_Kata.Entities.Incidents;
 using Code_Kata.Entities.WorkSchedules;
 
@@ -6,43 +5,37 @@ namespace Code_Kata.Services;
 
 public class AssignmentService
 {
-    private readonly EngineerService _engineerService;
     private readonly IncidentService _incidentService;
-    private readonly WorkScheduleService _workScheduleService;
+    private readonly SchedulingPlanner _planner;
+    private readonly SchedulingStateApplier _stateApplier;
 
     public AssignmentService()
-        : this(new EngineerService(), new IncidentService(), new WorkScheduleService())
+        : this(new IncidentService(), new SchedulingPlanner(), new SchedulingStateApplier())
     {
     }
 
-    public AssignmentService(
-        EngineerService engineerService,
+    internal AssignmentService(
         IncidentService incidentService,
-        WorkScheduleService workScheduleService)
+        SchedulingPlanner planner,
+        SchedulingStateApplier stateApplier)
     {
-        _engineerService = engineerService;
         _incidentService = incidentService;
-        _workScheduleService = workScheduleService;
+        _planner = planner;
+        _stateApplier = stateApplier;
     }
 
     public List<WorkScheduleEntry> AssignPendingIncidents()
     {
-        var createdEntries = new List<WorkScheduleEntry>();
-
-        foreach (var incident in _incidentService.GetPendingIncidents())
+        var pendingIncidents = _incidentService.GetPendingIncidents().ToList();
+        if (pendingIncidents.Count == 0)
         {
-            var scheduleEntry = TryScheduleIncident(incident);
-            if (scheduleEntry is null)
-            {
-                _incidentService.MarkAtRisk(incident);
-                continue;
-            }
-
-            _incidentService.MarkScheduled(incident, scheduleEntry.EngineerId);
-            createdEntries.Add(scheduleEntry);
+            State.WorkScheduleEntries = SchedulingStateApplier.SortEntries(State.WorkScheduleEntries);
+            return [];
         }
 
-        return createdEntries;
+        var plan = _planner.CreatePlan(pendingIncidents, State.Engineers, State.WorkScheduleEntries);
+        _stateApplier.Apply(pendingIncidents, plan);
+        return plan.Entries.ToList();
     }
 
     public WorkScheduleEntry? AssignIncident(Incident incident)
@@ -52,32 +45,15 @@ public class AssignmentService
             return null;
         }
 
-        var scheduleEntry = TryScheduleIncident(incident);
+        var plan = _planner.CreatePlan([incident], State.Engineers, State.WorkScheduleEntries);
+        _stateApplier.Apply([incident], plan);
+
+        var scheduleEntry = plan.Entries.SingleOrDefault();
         if (scheduleEntry is null)
         {
-            _incidentService.MarkAtRisk(incident);
             return null;
         }
 
-        _incidentService.MarkScheduled(incident, scheduleEntry.EngineerId);
         return scheduleEntry;
-    }
-
-    private WorkScheduleEntry? TryScheduleIncident(Incident incident)
-    {
-        var request = new EngineerRequest(
-            incident.Deadline,
-            incident.ReportedAt,
-            (int)incident.Severity * incident.Impact,
-            incident.Type,
-            incident.EstimatedMinutes);
-
-        var eligibleEngineers = _engineerService.GetAvailableEngineers(request);
-        if (eligibleEngineers.Count == 0)
-        {
-            return null;
-        }
-
-        return _workScheduleService.TrySchedule(eligibleEngineers, incident);
     }
 }

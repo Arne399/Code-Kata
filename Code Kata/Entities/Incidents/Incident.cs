@@ -6,6 +6,11 @@ public class Incident
     public string Title { get; set; } = string.Empty;
     public TimeOnly ReportedAt { get; set; }
     public TimeSpan Sla { get; set; }
+    public int SlaMinutes
+    {
+        get => (int)Sla.TotalMinutes;
+        set => Sla = TimeSpan.FromMinutes(value);
+    }
     public SkillType Type { get; set; }
     public Severity Severity { get; set; }
     public int Impact { get; set; }

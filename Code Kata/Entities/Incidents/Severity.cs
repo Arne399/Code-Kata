@@ -2,8 +2,8 @@ namespace Code_Kata.Entities.Incidents;
 
 public enum Severity
 {
-    Kritiek = 100,
-    Hoog = 70,
-    Normaal = 30,
-    Laag = 1
+    Laag = 1,
+    Normaal = 2,
+    Hoog = 3,
+    Kritiek = 5
 }

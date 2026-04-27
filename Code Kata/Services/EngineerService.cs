@@ -6,12 +6,26 @@ namespace Code_Kata.Services;
 
 public class EngineerService
 {
+	public IReadOnlyList<Engineer> GetQualifiedEngineers(SkillType skillType)
+	{
+    return GetQualifiedEngineers(State.Engineers, skillType);
+	}
+
+  public IReadOnlyList<Engineer> GetQualifiedEngineers(IEnumerable<Engineer> engineers, SkillType skillType)
+  {
+    return engineers
+      .Where(engineer => HasSkill(engineer, skillType))
+      .OrderBy(engineer => engineer.Id)
+      .ToList();
+  }
+
     public List<Engineer> GetAvailableEngineers(EngineerRequest request)
     {
         return State.Engineers
             .Where(engineer => HasSkill(engineer, request.SkillType))
-            .Where(engineer => IncidentFitsWithinSchedule(engineer, request))
+            .Where(engineer => HasWorkingTimeRemaining(engineer, request))
             .Where(engineer => GetRemainingWorkMinutes(engineer) >= request.EstimatedMinutes)
+            .OrderBy(engineer => engineer.Id)
             .ToList();
     }
 
@@ -34,10 +48,18 @@ public class EngineerService
             .ToList();
     }
 
-    private bool IncidentFitsWithinSchedule(Engineer engineer, EngineerRequest request)
+    private bool HasWorkingTimeRemaining(Engineer engineer, EngineerRequest request)
     {
-        var reportedAtWithinShift = request.ReportedAt >= engineer.AvailableFrom && request.ReportedAt < engineer.AvailableUntil;
-        var deadlineWithinShift = request.Deadline > engineer.AvailableFrom && request.Deadline <= engineer.AvailableUntil;
-        return reportedAtWithinShift && deadlineWithinShift;
+        var earliestStart = request.ReportedAt > engineer.AvailableFrom
+            ? request.ReportedAt
+            : engineer.AvailableFrom;
+
+        if (earliestStart >= engineer.AvailableUntil)
+        {
+            return false;
+        }
+
+        var latestEnd = earliestStart.AddMinutes(request.EstimatedMinutes);
+        return latestEnd <= engineer.AvailableUntil;
     }
 }

@@ -58,18 +58,9 @@ Console.ForegroundColor = ConsoleColor.Green;
 Console.WriteLine("JSON parsed successfully.");
 Console.ResetColor();
 
-IncidentService incidentService = new IncidentService();
-EngineerService engineerService = new EngineerService();
-WorkScheduleService workScheduleService = new WorkScheduleService();
-AssignmentService assignmentService = new AssignmentService();
-
-var pendingIncidents = incidentService.GetPendingIncidents();
-	State.WorkScheduleEntries = assignmentService.AssignPendingIncidents();
+ScheduleService scheduleService = new ScheduleService();
+var schedule = scheduleService.CreateSchedule();
 
 Console.WriteLine();
 Console.ForegroundColor = ConsoleColor.Gray;
-foreach (var workScheduleEntry in State.WorkScheduleEntries)
-{
-	var output = JsonParser.ToJson(workScheduleEntry);
-	Console.WriteLine(output);
-}
+Console.WriteLine(JsonParser.ToJson(schedule));

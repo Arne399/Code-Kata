@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Code Kata")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+4af5a083406d3d76282e442ca41de3ede5c3e4ea")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+0240a981de83e6c2ff818102bccea3bcc53b20d1")]
 [assembly: System.Reflection.AssemblyProductAttribute("Code Kata")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Code Kata")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

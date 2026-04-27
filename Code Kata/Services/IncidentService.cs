@@ -4,13 +4,26 @@ namespace Code_Kata.Services;
 
 public class IncidentService
 {
+	private readonly ScoringService _scoringService;
+
+	public IncidentService()
+		: this(new ScoringService())
+	{
+	}
+
+	public IncidentService(ScoringService scoringService)
+	{
+		_scoringService = scoringService;
+	}
+
 	public IReadOnlyList<Incident> GetPendingIncidents()
 	{
 		return State.Incidents
 			.Where(incident => incident.Status == IncidentStatus.New)
-			.OrderBy(incident => incident.Deadline)
-			.ThenByDescending(incident => (int)incident.Severity * incident.Impact)
+			.OrderByDescending(incident => _scoringService.GetUnresolvedPenalty(incident))
+			.ThenBy(incident => incident.Deadline)
 			.ThenBy(incident => incident.ReportedAt)
+			.ThenByDescending(incident => incident.EstimatedMinutes)
 			.ThenBy(incident => incident.Id)
 			.ToList();
 	}

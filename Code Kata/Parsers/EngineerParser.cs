@@ -6,6 +6,6 @@ public static class EngineerParser
 {
     public static List<Engineer> GetEngineers(string json)
     {
-        return JsonParser.Parse<List<Engineer>>(json);
+        return JsonParser.ParseCollection<Engineer>(json, "engineers");
     }
 }	

@@ -8,5 +8,5 @@ public static class State
 {
     public static List<Engineer> Engineers { get; set; } = [];
     public static List<Incident> Incidents  { get; set; } = [];
-    public static List<WorkScheduleEntry> WorkSchedules  { get; set; } = [];
+    public static List<WorkScheduleEntry> WorkScheduleEntries  { get; set; } = [];
 }

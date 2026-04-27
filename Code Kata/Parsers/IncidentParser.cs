@@ -6,7 +6,7 @@ public static class IncidentParser
 {
     public static List<Incident> GetIncidents(string json)
     {
-        return JsonParser.Parse<List<Incident>>(json);
+        return JsonParser.ParseCollection<Incident>(json, "incidents");
     }
  
 }

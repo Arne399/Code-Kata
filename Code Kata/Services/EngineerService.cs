@@ -28,7 +28,7 @@ public class EngineerService
 
     private IReadOnlyList<WorkScheduleEntry> GetScheduleEntriesForEngineer(string engineerId)
     {
-        return State.WorkSchedules
+        return State.WorkScheduleEntries
             .Where(entry => entry.EngineerId == engineerId)
             .OrderBy(entry => entry.StartAt)
             .ToList();

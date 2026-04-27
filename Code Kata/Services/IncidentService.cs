@@ -9,7 +9,7 @@ public class IncidentService
 		return State.Incidents
 			.Where(incident => incident.Status == IncidentStatus.New)
 			.OrderBy(incident => incident.Deadline)
-			.ThenByDescending(incident => incident.Severity * incident.Impact)
+			.ThenByDescending(incident => (int)incident.Severity * incident.Impact)
 			.ThenBy(incident => incident.ReportedAt)
 			.ThenBy(incident => incident.Id)
 			.ToList();

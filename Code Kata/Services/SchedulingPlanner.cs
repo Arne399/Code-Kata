@@ -1,15 +1,15 @@
 using Code_Kata.Entities.Engineers;
 using Code_Kata.Entities.Incidents;
 using Code_Kata.Entities.WorkSchedules;
-using System.Text;
 
 namespace Code_Kata.Services;
 
-internal class SchedulingPlanner
+internal sealed class SchedulingPlanner
 {
     private readonly EngineerService _engineerService;
     private readonly WorkScheduleService _workScheduleService;
     private readonly ScoringService _scoringService;
+    private readonly IncidentOrderingFactory _incidentOrderingFactory;
     private readonly int _beamWidth;
 
     public SchedulingPlanner()
@@ -26,6 +26,7 @@ internal class SchedulingPlanner
         _engineerService = engineerService;
         _workScheduleService = workScheduleService;
         _scoringService = scoringService;
+        _incidentOrderingFactory = new IncidentOrderingFactory(scoringService);
         _beamWidth = beamWidth;
     }
 
@@ -39,151 +40,150 @@ internal class SchedulingPlanner
             return SchedulingPlan.Empty;
         }
 
-        var orderedEngineers = engineers
+        var planningContext = CreatePlanningContext(incidents, engineers, existingEntries ?? []);
+        var bestCandidate = EvaluateIncidentOrderings(planningContext);
+        return ToPlan(bestCandidate);
+    }
+
+    private PlanningContext CreatePlanningContext(
+        IReadOnlyList<Incident> incidents,
+        IReadOnlyList<Engineer> engineers,
+        IReadOnlyList<WorkScheduleEntry> existingEntries)
+    {
+        var orderedEngineers = OrderEngineers(engineers);
+        var initialEngineerStates = EngineerAvailabilityState.CreateInitialStates(orderedEngineers, existingEntries);
+        var candidateEngineerIndexes = BuildCandidateEngineerIndexes(incidents, orderedEngineers);
+
+        return new PlanningContext(incidents, orderedEngineers, candidateEngineerIndexes, initialEngineerStates);
+    }
+
+    private static IReadOnlyList<Engineer> OrderEngineers(IEnumerable<Engineer> engineers)
+    {
+        return engineers
             .OrderBy(engineer => engineer.Id)
             .ToList();
+    }
 
-        var initialStates = BuildInitialStates(orderedEngineers, existingEntries ?? []);
+    private IReadOnlyList<int[]> BuildCandidateEngineerIndexes(
+        IReadOnlyList<Incident> incidents,
+        IReadOnlyList<Engineer> orderedEngineers)
+    {
         var engineerIndexById = orderedEngineers
             .Select((engineer, index) => new { engineer.Id, Index = index })
             .ToDictionary(item => item.Id, item => item.Index, StringComparer.Ordinal);
 
-        var candidateEngineerIndexes = incidents
+        return incidents
             .Select(incident => _engineerService.GetQualifiedEngineers(orderedEngineers, incident.Type)
                 .Select(engineer => engineerIndexById[engineer.Id])
                 .ToArray())
             .ToArray();
-
-        CandidateState? bestState = null;
-        foreach (var ordering in BuildIncidentOrderings(incidents))
-        {
-            var candidate = BuildScheduleForOrdering(ordering, incidents, orderedEngineers, candidateEngineerIndexes, initialStates);
-            bestState = ChooseBetter(bestState, candidate);
-        }
-
-        return ToPlan(bestState ?? CandidateState.Empty(initialStates));
     }
 
-    private CandidateState BuildScheduleForOrdering(
-        IReadOnlyList<int> incidentOrder,
-        IReadOnlyList<Incident> incidents,
-        IReadOnlyList<Engineer> engineers,
-        IReadOnlyList<int[]> candidateEngineerIndexes,
-        IReadOnlyList<EngineerAvailabilityState> initialStates)
+    private SchedulingCandidateState EvaluateIncidentOrderings(PlanningContext planningContext)
     {
-        var beam = new List<CandidateState>
+        SchedulingCandidateState? bestCandidate = null;
+
+        foreach (var incidentOrder in _incidentOrderingFactory.Create(planningContext.Incidents))
         {
-            CandidateState.Empty(initialStates)
+            var candidate = EvaluateIncidentOrdering(planningContext, incidentOrder);
+            bestCandidate = ChooseBetter(bestCandidate, candidate);
+        }
+
+        return bestCandidate ?? SchedulingCandidateState.Empty(planningContext.InitialEngineerStates);
+    }
+
+    private SchedulingCandidateState EvaluateIncidentOrdering(
+        PlanningContext planningContext,
+        IReadOnlyList<int> incidentOrder)
+    {
+        var currentBeam = new List<SchedulingCandidateState>
+        {
+            SchedulingCandidateState.Empty(planningContext.InitialEngineerStates)
         };
 
         foreach (var incidentIndex in incidentOrder)
         {
-            var incident = incidents[incidentIndex];
-            var nextBySignature = new Dictionary<string, CandidateState>(StringComparer.Ordinal);
-
-            foreach (var state in beam)
-            {
-                AddCandidate(nextBySignature, state.WithUnassigned(incident, _scoringService));
-
-                foreach (var engineerIndex in candidateEngineerIndexes[incidentIndex])
-                {
-                    var engineer = engineers[engineerIndex];
-                    var engineerState = state.EngineerStates[engineerIndex];
-                    var scheduleEntry = _workScheduleService.TryCreateScheduleEntry(
-                        engineer,
-                        incident,
-                        engineerState.NextAvailableAt,
-                        engineerState.RemainingMinutes);
-
-                    if (scheduleEntry is null)
-                    {
-                        continue;
-                    }
-
-                    AddCandidate(nextBySignature, state.WithAssignment(engineerIndex, scheduleEntry, incident, _scoringService));
-                }
-            }
-
-            beam = nextBySignature.Values
-                .OrderBy(candidate => candidate.TotalPenalty)
-                .ThenBy(candidate => candidate.UnresolvedPenalty)
-                .ThenBy(candidate => candidate.LatePenalty)
-                .ThenByDescending(candidate => candidate.Entries.Count)
-                .ThenBy(candidate => candidate.PlanKey)
-                .Take(_beamWidth)
-                .ToList();
+            currentBeam = ExpandBeam(planningContext, currentBeam, incidentIndex);
         }
 
-        return beam
+        return RankCandidates(currentBeam)
+            .First();
+    }
+
+    private List<SchedulingCandidateState> ExpandBeam(
+        PlanningContext planningContext,
+        IReadOnlyList<SchedulingCandidateState> currentBeam,
+        int incidentIndex)
+    {
+        var incident = planningContext.Incidents[incidentIndex];
+        var candidatesBySignature = new Dictionary<string, SchedulingCandidateState>(StringComparer.Ordinal);
+
+        foreach (var candidate in currentBeam)
+        {
+            AddUnassignedCandidate(candidatesBySignature, candidate, incident);
+            AddAssignedCandidates(candidatesBySignature, planningContext, candidate, incidentIndex, incident);
+        }
+
+        return RankCandidates(candidatesBySignature.Values)
+            .Take(_beamWidth)
+            .ToList();
+    }
+
+    private void AddUnassignedCandidate(
+        IDictionary<string, SchedulingCandidateState> candidatesBySignature,
+        SchedulingCandidateState candidate,
+        Incident incident)
+    {
+        AddCandidate(candidatesBySignature, candidate.WithUnassigned(incident, _scoringService));
+    }
+
+    private void AddAssignedCandidates(
+        IDictionary<string, SchedulingCandidateState> candidatesBySignature,
+        PlanningContext planningContext,
+        SchedulingCandidateState candidate,
+        int incidentIndex,
+        Incident incident)
+    {
+        foreach (var engineerIndex in planningContext.CandidateEngineerIndexes[incidentIndex])
+        {
+            TryAddAssignedCandidate(candidatesBySignature, planningContext.Engineers, candidate, engineerIndex, incident);
+        }
+    }
+
+    private void TryAddAssignedCandidate(
+        IDictionary<string, SchedulingCandidateState> candidatesBySignature,
+        IReadOnlyList<Engineer> engineers,
+        SchedulingCandidateState candidate,
+        int engineerIndex,
+        Incident incident)
+    {
+        var engineer = engineers[engineerIndex];
+        var engineerState = candidate.EngineerStates[engineerIndex];
+        var scheduleEntry = _workScheduleService.TryCreateScheduleEntry(
+            engineer,
+            incident,
+            engineerState.NextAvailableAt,
+            engineerState.RemainingMinutes);
+
+        if (scheduleEntry is null)
+        {
+            return;
+        }
+
+        AddCandidate(candidatesBySignature, candidate.WithAssignment(engineerIndex, scheduleEntry, incident, _scoringService));
+    }
+
+    private IEnumerable<SchedulingCandidateState> RankCandidates(IEnumerable<SchedulingCandidateState> candidates)
+    {
+        return candidates
             .OrderBy(candidate => candidate.TotalPenalty)
             .ThenBy(candidate => candidate.UnresolvedPenalty)
             .ThenBy(candidate => candidate.LatePenalty)
             .ThenByDescending(candidate => candidate.Entries.Count)
-            .ThenBy(candidate => candidate.PlanKey)
-            .First();
+            .ThenBy(candidate => candidate.PlanKey);
     }
 
-    private IEnumerable<IReadOnlyList<int>> BuildIncidentOrderings(IReadOnlyList<Incident> incidents)
-    {
-        var indexedIncidents = incidents
-            .Select((incident, index) => new IndexedIncident(index, incident))
-            .ToList();
-
-        return
-        [
-            indexedIncidents
-                .OrderByDescending(item => _scoringService.GetUnresolvedPenalty(item.Incident))
-                .ThenBy(item => item.Incident.Deadline)
-                .ThenBy(item => item.Incident.ReportedAt)
-                .Select(item => item.Index)
-                .ToArray(),
-
-            indexedIncidents
-                .OrderBy(item => item.Incident.Deadline)
-                .ThenByDescending(item => _scoringService.GetUnresolvedPenalty(item.Incident))
-                .ThenBy(item => item.Incident.ReportedAt)
-                .Select(item => item.Index)
-                .ToArray(),
-
-            indexedIncidents
-                .OrderByDescending(item => _scoringService.GetWeightedImpact(item.Incident))
-                .ThenBy(item => item.Incident.Deadline)
-                .ThenByDescending(item => item.Incident.EstimatedMinutes)
-                .Select(item => item.Index)
-                .ToArray(),
-
-            indexedIncidents
-                .OrderByDescending(item => (double)_scoringService.GetUnresolvedPenalty(item.Incident) / Math.Max(1, item.Incident.EstimatedMinutes))
-                .ThenBy(item => item.Incident.Deadline)
-                .ThenBy(item => item.Incident.ReportedAt)
-                .Select(item => item.Index)
-                .ToArray()
-        ];
-    }
-
-    private static IReadOnlyList<EngineerAvailabilityState> BuildInitialStates(
-        IReadOnlyList<Engineer> engineers,
-        IReadOnlyList<WorkScheduleEntry> existingEntries)
-    {
-        return engineers
-            .Select(engineer =>
-            {
-                var engineerEntries = existingEntries
-                    .Where(entry => entry.EngineerId == engineer.Id)
-                    .OrderBy(entry => entry.StartAt)
-                    .ToList();
-
-                var nextAvailableAt = engineerEntries.LastOrDefault()?.EndAt ?? engineer.AvailableFrom;
-                var remainingMinutes = engineer.MaxWorkMinutes - engineerEntries.Sum(entry => entry.Minutes);
-
-                return new EngineerAvailabilityState(
-                    nextAvailableAt > engineer.AvailableFrom ? nextAvailableAt : engineer.AvailableFrom,
-                    Math.Max(0, remainingMinutes));
-            })
-            .ToArray();
-    }
-
-    private static void AddCandidate(IDictionary<string, CandidateState> candidatesBySignature, CandidateState candidate)
+    private static void AddCandidate(IDictionary<string, SchedulingCandidateState> candidatesBySignature, SchedulingCandidateState candidate)
     {
         if (candidatesBySignature.TryGetValue(candidate.Signature, out var existing))
         {
@@ -194,7 +194,7 @@ internal class SchedulingPlanner
         candidatesBySignature[candidate.Signature] = candidate;
     }
 
-    private static CandidateState? ChooseBetter(CandidateState? currentBest, CandidateState? candidate)
+    private static SchedulingCandidateState? ChooseBetter(SchedulingCandidateState? currentBest, SchedulingCandidateState? candidate)
     {
         if (candidate is null)
         {
@@ -229,7 +229,7 @@ internal class SchedulingPlanner
         return string.CompareOrdinal(candidate.PlanKey, currentBest.PlanKey) < 0 ? candidate : currentBest;
     }
 
-    private SchedulingPlan ToPlan(CandidateState state)
+    private SchedulingPlan ToPlan(SchedulingCandidateState state)
     {
         var orderedEntries = state.Entries
             .OrderBy(entry => entry.EngineerId)
@@ -246,105 +246,10 @@ internal class SchedulingPlanner
         return new SchedulingPlan(orderedEntries, unassignedIncidentIds);
     }
 
-    private static string CreateStateSignature(IReadOnlyList<EngineerAvailabilityState> engineerStates)
-    {
-        var builder = new StringBuilder();
-
-        for (var index = 0; index < engineerStates.Count; index++)
-        {
-            if (index > 0)
-            {
-                builder.Append('|');
-            }
-
-            var engineerState = engineerStates[index];
-            builder.Append((int)engineerState.NextAvailableAt.ToTimeSpan().TotalMinutes)
-                .Append(':')
-                .Append(engineerState.RemainingMinutes);
-        }
-
-        return builder.ToString();
-    }
-
-    private static string CreatePlanKey(
-        IReadOnlyList<WorkScheduleEntry> entries,
-        IReadOnlyList<string> unassignedIncidentIds)
-    {
-        var entriesKey = string.Join(
-            '|',
-            entries
-                .OrderBy(entry => entry.EngineerId)
-                .ThenBy(entry => entry.StartAt)
-                .ThenBy(entry => entry.EndAt)
-                .ThenBy(entry => entry.IncidentId)
-                .Select(entry => $"{entry.EngineerId}:{entry.IncidentId}:{entry.StartAt:HH\\:mm}:{entry.EndAt:HH\\:mm}"));
-
-        var unassignedKey = string.Join(',', unassignedIncidentIds.OrderBy(id => id, StringComparer.Ordinal));
-        return $"{entriesKey}#{unassignedKey}";
-    }
-
-    private readonly record struct IndexedIncident(int Index, Incident Incident);
-
-    private readonly record struct EngineerAvailabilityState(TimeOnly NextAvailableAt, int RemainingMinutes);
-
-    private sealed record CandidateState(
-        IReadOnlyList<EngineerAvailabilityState> EngineerStates,
-        IReadOnlyList<WorkScheduleEntry> Entries,
-        IReadOnlyList<string> UnassignedIncidentIds,
-        long LatePenalty,
-        long UnresolvedPenalty,
-        string Signature,
-        string PlanKey)
-    {
-        public long TotalPenalty => LatePenalty + UnresolvedPenalty;
-
-        public static CandidateState Empty(IReadOnlyList<EngineerAvailabilityState> initialStates)
-        {
-            var clonedStates = initialStates.ToArray();
-            return new CandidateState(clonedStates, Array.Empty<WorkScheduleEntry>(), Array.Empty<string>(), 0, 0, CreateStateSignature(clonedStates), string.Empty);
-        }
-
-        public CandidateState WithUnassigned(Incident incident, ScoringService scoringService)
-        {
-            var updatedUnassignedIncidentIds = UnassignedIncidentIds
-                .Append(incident.Id)
-                .ToArray();
-
-            return new CandidateState(
-                EngineerStates.ToArray(),
-                Entries.ToArray(),
-                updatedUnassignedIncidentIds,
-                LatePenalty,
-                UnresolvedPenalty + scoringService.GetUnresolvedPenalty(incident),
-                Signature,
-                CreatePlanKey(Entries, updatedUnassignedIncidentIds));
-        }
-
-        public CandidateState WithAssignment(
-            int engineerIndex,
-            WorkScheduleEntry scheduleEntry,
-            Incident incident,
-            ScoringService scoringService)
-        {
-            var updatedEngineerStates = EngineerStates.ToArray();
-            var engineerState = updatedEngineerStates[engineerIndex];
-            updatedEngineerStates[engineerIndex] = new EngineerAvailabilityState(
-                scheduleEntry.EndAt,
-                engineerState.RemainingMinutes - incident.EstimatedMinutes);
-
-            var updatedEntries = Entries
-                .Append(scheduleEntry)
-                .ToArray();
-
-            return new CandidateState(
-                updatedEngineerStates,
-                updatedEntries,
-                UnassignedIncidentIds.ToArray(),
-                LatePenalty + scoringService.GetLatePenalty(incident, scheduleEntry.EndAt),
-                UnresolvedPenalty,
-                CreateStateSignature(updatedEngineerStates),
-                CreatePlanKey(updatedEntries, UnassignedIncidentIds));
-        }
-    }
+    private sealed record PlanningContext(
+        IReadOnlyList<Incident> Incidents,
+        IReadOnlyList<Engineer> Engineers,
+        IReadOnlyList<int[]> CandidateEngineerIndexes,
+        IReadOnlyList<EngineerAvailabilityState> InitialEngineerStates);
 }
 

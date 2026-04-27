@@ -7,5 +7,5 @@ public class WorkScheduleEntry
     public string IncidentId { get; set; } = string.Empty;
     public TimeOnly StartAt { get; set; }
     public TimeOnly EndAt { get; set; }
-    public int Minutes { get; set; }
+    public int Minutes => (int)(EndAt - StartAt).TotalMinutes;
 }

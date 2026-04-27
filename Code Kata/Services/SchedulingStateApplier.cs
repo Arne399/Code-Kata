@@ -3,7 +3,7 @@ using Code_Kata.Entities.WorkSchedules;
 
 namespace Code_Kata.Services;
 
-public class SchedulingStateApplier
+internal class SchedulingStateApplier
 {
     private readonly IncidentService _incidentService;
 

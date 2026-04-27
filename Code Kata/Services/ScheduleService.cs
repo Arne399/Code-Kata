@@ -13,7 +13,7 @@ public class ScheduleService
     {
     }
 
-    public ScheduleService(
+    internal ScheduleService(
         IncidentService incidentService,
         SchedulingPlanner planner,
         SchedulingStateApplier stateApplier)

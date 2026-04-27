@@ -5,7 +5,7 @@ using System.Text;
 
 namespace Code_Kata.Services;
 
-public class SchedulingPlanner
+internal class SchedulingPlanner
 {
     private readonly EngineerService _engineerService;
     private readonly WorkScheduleService _workScheduleService;

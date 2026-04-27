@@ -1,6 +1,11 @@
-namespace Code_Kata.Parsers;
+using Code_Kata.Entities.Engineers;
 
-public class EngineerParser
+namespace Code_Kata.Parsers;
+ 
+public static class EngineerParser
 {
-    
-}
+    public static List<Engineer> GetEngineers(string json)
+    {
+        return JsonParser.Parse<List<Engineer>>(json);
+    }
+}	

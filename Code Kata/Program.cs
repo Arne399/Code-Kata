@@ -1,6 +1,7 @@
 ﻿using Code_Kata; 
 using Code_Kata.Parsers;
 using System.Text;
+using Code_Kata.Services;
 
 Console.Clear();
 Console.ForegroundColor = ConsoleColor.Cyan;
@@ -56,6 +57,14 @@ Console.WriteLine();
 Console.ForegroundColor = ConsoleColor.Green;
 Console.WriteLine("JSON parsed successfully.");
 Console.ResetColor();
+
+IncidentService incidentService = new IncidentService();
+EngineerService engineerService = new EngineerService();
+WorkScheduleService workScheduleService = new WorkScheduleService();
+AssignmentService assignmentService = new AssignmentService();
+
+var pendingIncidents = incidentService.GetPendingIncidents();
+	State.WorkScheduleEntries = assignmentService.AssignPendingIncidents();
 
 Console.WriteLine();
 Console.ForegroundColor = ConsoleColor.Gray;
